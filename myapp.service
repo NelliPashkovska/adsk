@@ -1,0 +1,12 @@
+[Unit]
+Description=My nice service
+After=network-online.target
+
+[Service]
+Type=simple
+User=ec2-user
+ExecStart=/usr/bin/java -jar /home/ec2-user/ApplicationJar.jar
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

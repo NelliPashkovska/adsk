@@ -1,0 +1,138 @@
+---
+- hosts: server
+  become: yes
+  vars:
+    wordpress_path: /var/www/wordpress
+  tasks:
+    - name: "Install apache server"
+      yum:
+        name: httpd
+        state: latest
+#    - name: "install php"
+#      yum:
+#        name: "{{packages}}"
+#        state: latest
+#      vars:
+#        packages:
+#         - php
+#         - php-mysql
+#         - MySQL-python
+#    - name: "Download wordpress"
+#      get_url:
+#        url: https://wordpress.org/latest.zip
+#        dest: /tmp/wordpress.zip
+#    - name: "Unarchive wordpress"
+#      unarchive:
+#        src: /tmp/wordpress.zip
+#        dest: /var/www
+#        remote_src: yes
+    - name: "Start service httpd, if not started"
+      service:
+        name: httpd
+        state: restarted
+
+
+- hosts: statistics
+  become: yes
+  vars:
+    grafana_url: https://s3-us-west-2.amazonaws.com/grafana-releases/release/grafana-5.3.4-1.x86_64.rpm
+    influxdb_url: https://dl.influxdata.com/influxdb/releases/influxdb-1.7.1.x86_64.rpm
+  tasks:
+    - name: "Install influxdb"
+      yum:
+        name: "{{influxdb_url}}"
+        state: present
+    - service:
+        name: influxdb
+        state: restarted
+    - name: "Install grafana"
+      yum:
+        name: "{{grafana_url}}"
+        state: present
+    - copy:
+        src: templates/grafana.ini
+        dest: /etc/grafana/grafana.ini
+    - service:
+        name: grafana-server
+        state: restarted
+    - name: Create influxdb datasource
+      grafana_datasource:
+        name: "source_name"
+        grafana_url: "http://127.0.0.1:8080"
+        grafana_user: "admin"
+        grafana_password: "admin"
+        org_id: "1"
+        ds_type: "influxdb"
+        url: "http://35.157.104.79:8086"
+        database: "metrics"
+        
+- hosts: proxy-server
+  become: yes
+  tasks:
+    - name: "EPEL"
+      yum:
+        name: "https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm"
+        state: present
+    - name: 'Install nginx'
+      yum:
+        name: nginx
+        state: present
+    - name: "start nginx service"
+      service:
+        name: nginx
+        state: started
+    - name: "copy conf file"
+      template:
+        src: templates/nginx_server.conf
+        dest: "/etc/nginx/nginx.conf"
+    - name: "reload nginx server"
+      service:
+        name: nginx
+        state: reloaded
+        
+- hosts: telegraf
+  become: yes
+  vars:
+    telegraf_url: https://dl.influxdata.com/telegraf/releases/telegraf-1.8.3-1.x86_64.rpm
+    metrics_storage_ip: 172.31.19.59
+  tasks:
+    - name: "Install telegraf"
+      yum:
+        name: "{{telegraf_url}}"
+        state: present
+    - template:
+        src: templates/telegraf.conf
+        dest: /etc/telegraf/telegraf.conf
+    - service:
+        name: telegraf
+        state: restarted
+        
+- hosts: init_app
+  become: yes
+  tasks:
+    - name: "install java"
+      yum:
+        name: java-1.8.0-openjdk
+        state: present
+    - name: "create path"
+      file:
+        path: /usr/bin
+        state: directory
+    - name: "create user for service"
+      user:
+        name: myapp
+    - name: "copy application"
+      copy:
+        src: digital-commerce/target/digital-commerce-1.0-SNAPSHOT.jar
+        dest: /home/ec2-user/ApplicationJar.jar
+    - template:
+        src: myapp.service
+        dest: /etc/systemd/system/myapp.service
+    - name: "reload service"
+      systemd:
+        daemon_reload: yes
+    - name: "start app"
+      service:
+        state: restarted
+        name: myapp
+        enabled: yes                    
